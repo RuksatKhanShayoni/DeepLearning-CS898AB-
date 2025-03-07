@@ -1,128 +1,165 @@
-import torch #PyTorch Library
-import torch.nn as nn #neural network layers and loss functions
-import torch.optim as optim #optimization algorithms
-import torchvision #datasets, transforms, and models
-import torchvision.transforms as transforms
-import time #measure training time per epoch
-import matplotlib.pyplot as plt #plotting graphs
+import os
+import random
+from pathlib import Path
+import cv2
+import matplotlib.pyplot as plt
 
-# Define device for training (CPU/GPU)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Load and preprocess CIFAR-10 dataset
-transform = transforms.Compose([
-    transforms.ToTensor(), #Converts images into PyTorch tensor
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) #Normalizes pixel values from (0 to 255) to (-1 to 1)
-])
-
-#define batch size
-batch_size = 128
-
-#Downloads CIFAR-10 dataset, loads training dataset and transform
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True)
-
-#Downloads CIFAR-10 dataset,  loads testing dataset  and transform
-testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+# Define paths
+TINY_IMAGENET_PATH = "/Users/ruksatkhanshayoni/Downloads/tiny-imagenet-200/train"
+OUTPUT_DATASET_PATH = "/Users/ruksatkhanshayoni/Downloads/tiny-imagenet-output"
 
 
-# Define CNN Model
-class CNN(nn.Module):
-    def __init__(self, activation_function):
-        super(CNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2) # Max pooling reduces image size by 2x2
-        self.activation = activation_function
+TRAIN_PATH = os.path.join(OUTPUT_DATASET_PATH, "train")
+VALID_PATH = os.path.join(OUTPUT_DATASET_PATH, "valid")
+TEST_PATH = os.path.join(OUTPUT_DATASET_PATH, "test")
 
-        #fully connected layers
-        self.fc1 = nn.Linear(256 * 2 * 2, 512)
-        self.fc2 = nn.Linear(512, 10)
+# Define dataset parameters
+NUM_CLASSES = 100
+IMAGES_PER_CLASS = 500
+IMAGE_SIZE = 256  # Required for AlexNet preprocessing
 
-    #forward pass
-    def forward(self, x):
-        x = self.pool(self.activation(self.conv1(x)))
-        x = self.pool(self.activation(self.conv2(x)))
-        x = self.pool(self.activation(self.conv3(x)))
-        x = self.pool(self.activation(self.conv4(x)))
-        x = torch.flatten(x, 1)  # Flatten tensor into a 1D vector
-        x = self.activation(self.fc1(x))
-        x = self.fc2(x)
-        return x
+# Create directories for the new dataset
+for split in ["train", "test", "val"]:
+    os.makedirs(os.path.join(OUTPUT_DATASET_PATH, split), exist_ok=True)
 
+# Select 100 random classes ignoring non-directory files
+all_classes = [d for d in sorted(os.listdir(TINY_IMAGENET_PATH)) if os.path.isdir(os.path.join(TINY_IMAGENET_PATH, d))]
+selected_classes = random.sample(all_classes, NUM_CLASSES)
 
-# Training Function
-def train_model(activation_fn, activation_name):
-    model = CNN(activation_fn).to(device) #creates a CNN model with the given activation function
-    criterion = nn.CrossEntropyLoss() #loss function for classification.
-    optimizer = optim.Adam(model.parameters(), lr=0.001) #update weights using Adam
+# Access nested directories for images
+selected_class_dirs = {cls: Path(TINY_IMAGENET_PATH) / cls / "images" for cls in selected_classes}
 
-    epochs = 50  # Upper limit, but we stop at 25% error
-    times_per_epoch = [] #Keep track of training time per epoch
-    train_errors = [] #stores time per epoch.
-
-    for epoch in range(epochs):
-        start_time = time.time()
-        correct, total = 0, 0
-        running_loss = 0.0
-
-        # This loop iterates the dataset, calculate loss, and update the model
-        for images, labels in trainloader:
-            images, labels = images.to(device), labels.to(device)
-
-            optimizer.zero_grad() # Clears gradients
-            outputs = model(images) # Forward pass
-            loss = criterion(outputs, labels) #loss
-            loss.backward() # Backpropagation
-            optimizer.step() # Update weights
-
-            running_loss += loss.item()  # Accumulate total loss
-
-            # Get predicted labels
-            predicted_labels = torch.argmax(outputs, dim=1)
-
-            # Update total number of samples
-            total_samples = labels.size(0)
-            total += total_samples
-
-            # Count correct predictions
-            correct_predictions = (predicted_labels == labels).sum().item()
-            correct += correct_predictions
-
-        #Calculate epoch time
-        epoch_time = time.time() - start_time
-        times_per_epoch.append(epoch_time)
-
-        #Training Error
-        train_error = 1 - (correct / total)
-        train_errors.append(train_error)
-
-        print(
-            f"Epoch {epoch + 1}, Loss: {running_loss:.4f}, Training Error: {train_error:.4f}, Time: {epoch_time:.2f}s")
-
-        if train_error <= 0.25:  # Stop training when error reaches 25%
-            break
-
-    return times_per_epoch, train_errors
+# Prepare dataset
+train_images = []
+test_images = []
+val_images = []
 
 
-# Activation Function ReLU, Tanh, Sigmoid
-relu_times, relu_errors = train_model(nn.ReLU(), "ReLU")
-tanh_times, tanh_errors = train_model(nn.Tanh(), "Tanh")
-sigmoid_times, sigmoid_errors = train_model(nn.Sigmoid(), "Sigmoid")
+for class_name in selected_class_dirs:
+    class_path = os.path.join(TINY_IMAGENET_PATH, class_name, "images")
+    images = sorted(os.listdir(class_path))[:IMAGES_PER_CLASS]  # Take first 500 images
 
-# Graph Plot
-plt.figure(figsize=(8, 6))
-plt.plot(range(1, len(relu_errors) + 1), relu_errors, label="ReLU", marker='o')
-plt.plot(range(1, len(tanh_errors) + 1), tanh_errors, label="Tanh", marker='s')
-plt.plot(range(1, len(sigmoid_errors) + 1), sigmoid_errors, label="Sigmoid", marker='^')
+    # Shuffle images to ensure randomness
+    random.shuffle(images)
 
-plt.xlabel("Epochs")
-plt.ylabel("Training Error Rate")
-plt.title("Training Time per Epoch for ReLU, Tanh and Sigmoid")
-plt.legend()
-plt.grid()
-plt.show()
+# Shuffle to distribute classes evenly for training, testing and validation
+random.shuffle(train_images)
+random.shuffle(test_images)
+random.shuffle(val_images)
+
+# Function to preprocess, resize and center crop the image to 256x256
+def preprocess_image(img_path):
+    img = cv2.imread(img_path)
+    if img is None:
+        return None
+
+    # Original Shape
+    h, w, _ = img.shape
+    print(f"Original shape: {h}x{w}")  # Debug print for original size
+
+    #resize
+    scale = IMAGE_SIZE / min(h, w)
+    new_w, new_h = int(w * scale), int(h * scale)
+    img = cv2.resize(img, (new_w, new_h))
+
+    print(f"Resized shape: {new_h}x{new_w}")  # Debug print for resized size
+
+    # Center crop 256x256
+    start_x = (new_w - IMAGE_SIZE) // 2
+    start_y = (new_h - IMAGE_SIZE) // 2
+    img = img[start_y:start_y + IMAGE_SIZE, start_x:start_x + IMAGE_SIZE]
+
+    print(f"Cropped shape: {img.shape}")  # Debug print for cropped size
+
+    return img
+
+# Function to split and move images into their respective directories
+def split_and_move_images():
+    for class_name in selected_classes:
+        class_dir = os.path.join(TINY_IMAGENET_PATH, class_name, "images")
+        images = sorted(os.listdir(class_dir))[:IMAGES_PER_CLASS]  # Select 500 images per class
+
+        # Shuffle the images for randomness
+        random.shuffle(images)
+
+        # Split into training, validation, and testing sets
+        train_images = images[:int(len(images) * 0.7)]  # 70% for training 300 images
+        valid_images = images[int(len(images) * 0.7):int(len(images) * 0.85)]  # 15% for validation 100 images
+        test_images = images[int(len(images) * 0.85):]  # 15% for testing 100 images
+
+        # Create directories for each class in the corresponding set
+        class_train_dir = os.path.join(TRAIN_PATH, class_name)
+        class_valid_dir = os.path.join(VALID_PATH, class_name)
+        class_test_dir = os.path.join(TEST_PATH, class_name)
+
+        os.makedirs(class_train_dir, exist_ok=True)
+        os.makedirs(class_valid_dir, exist_ok=True)
+        os.makedirs(class_test_dir, exist_ok=True)
+
+        # Move the images into their corresponding sets
+        for img_name in train_images:
+            img_path = os.path.join(class_dir, img_name)
+            img = preprocess_image(img_path)
+            if img is not None:
+                cv2.imwrite(os.path.join(class_train_dir, img_name), img)
+
+        for img_name in valid_images:
+            img_path = os.path.join(class_dir, img_name)
+            img = preprocess_image(img_path)
+            if img is not None:
+                cv2.imwrite(os.path.join(class_valid_dir, img_name), img)
+
+        for img_name in test_images:
+            img_path = os.path.join(class_dir, img_name)
+            img = preprocess_image(img_path)
+            if img is not None:
+                cv2.imwrite(os.path.join(class_test_dir, img_name), img)
+
+
+# Function to visualize the image before and after preprocessing
+def visualize_preprocessing(class_name, image_name):
+    # Define original image path
+    original_img_path = os.path.join(TINY_IMAGENET_PATH, class_name, "images", image_name)
+
+    # Read the original image
+    original_img = cv2.imread(original_img_path)
+    if original_img is None:
+        print(f"Original image {image_name} not found!")
+        return
+    original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+
+    # Preprocess the image
+    processed_img = preprocess_image(original_img_path)
+    if processed_img is None:
+        print(f"Error in processing image {image_name}!")
+        return
+    processed_img = cv2.cvtColor(processed_img, cv2.COLOR_BGR2RGB)
+
+    # Plotting original and preprocessed images
+    fig, ax = plt.subplots(1, 2, figsize=(2, 1))  # Reduced size to avoid pixelation
+
+    # Original image plot
+    ax[0].imshow(original_img)
+    ax[0].set_title("Original")
+    ax[0].axis("off")
+
+    # Processed image plot
+    ax[1].imshow(processed_img)
+    ax[1].set_title("Processed")
+    ax[1].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+
+# Select a random class and image to visualize
+selected_class = random.choice(selected_classes)  # Random class
+selected_image = random.choice(os.listdir(os.path.join(TINY_IMAGENET_PATH, selected_class, "images")))  # Random image
+
+# Visualize the images
+visualize_preprocessing(selected_class, selected_image)
+
+# Call the function to split and move the images
+split_and_move_images()
+
+print("Dataset preparation is complete!")
