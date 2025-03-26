@@ -1,3 +1,6 @@
-This repository concerns the Deep Learning course conducted at the Wichita State University.
+[This repository concerns the Deep Learning course conducted at the Wichita State University.
 
-All the codes from the assignments and tasks will be added here.
+All the codes from the assignments and tasks will be added here.]
+
+
+The main.py file contains the code for Data Preprocessing and the AlexNet model initialization, training and plotting includes in the train_alexnet.py file
